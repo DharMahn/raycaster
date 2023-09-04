@@ -19,8 +19,8 @@ namespace ray_marching
         HitResult[] hitResults;
         float maxspeed = 5f;
         private const int max = 20;
-        const float fov = 500f;
-        const int raysHalf = 250;
+        const float fov = (float)Math.PI/3f;
+        const int screenResolution = 400;
         //private float circleSize = 0;
         private Random r = new Random();
         private Bitmap render;
@@ -142,7 +142,7 @@ namespace ray_marching
             shapes = new List<Shape>();
             Width = formWidth;
             Height = formHeight;
-            render = new Bitmap(raysHalf * 2, formHeight);
+            render = new Bitmap(screenResolution, formHeight);
             player = new Circle
             {
                 Position = new Vector2(Width / 2, Height / 2),
@@ -167,7 +167,7 @@ namespace ray_marching
                 {
                     shapes.Add(new Circle
                     {
-                        Position = new Vector2(r.Next(0, Width)),
+                        Position = new Vector2(r.Next(0, Width), r.Next(0, Width)),
                         Size = new Vector2(r.Next(5, 40)),
                         Color = Color.Red
                     });
@@ -176,8 +176,8 @@ namespace ray_marching
                 {
                     shapes.Add(new Box
                     {
-                        Position = new Vector2(r.Next(0, Width)),
-                        Size = new Vector2(r.Next(5, 40),r.Next(5,40)),
+                        Position = new Vector2(r.Next(0, Width), r.Next(0, Width)),
+                        Size = new Vector2(r.Next(5, 40), r.Next(5, 40)),
                         Color = Color.Blue
                     });
                 }
@@ -185,7 +185,7 @@ namespace ray_marching
                 {
                     shapes.Add(new StarFive
                     {
-                        Position = new Vector2(r.Next(0, Width)),
+                        Position = new Vector2(r.Next(0, Width), r.Next(0, Height)),
                         Size = new Vector2(r.Next(5, 5), r.Next(5, 5)),
                         Color = Color.Purple
                     });
@@ -202,7 +202,7 @@ namespace ray_marching
             shapes.Add(new Box { Position = new Vector2(ClientSize.Width / 2, -3), Size = new Vector2(ClientSize.Width / 2, 6), Color = Color.Blue });
             shapes.Add(new Box { Position = new Vector2(ClientSize.Width / 2, ClientSize.Height + 3), Size = new Vector2(ClientSize.Width / 2, 6), Color = Color.Blue });
             Height = (formHeight * 2) + 100;
-            hitResults = new HitResult[raysHalf * 2];
+            hitResults = new HitResult[screenResolution];
         }
         Vector2 EstimateNormal(Vector2 pos)
         {
@@ -214,121 +214,114 @@ namespace ray_marching
         Vector2 gravity = Vector2.UnitY * 2f;
         private void timer1_Tick(object sender, EventArgs e)
         {
-
-            //hitResults = new HitResult[raysHalf * 2];
-            if (!left && !right)
-            {
-                velocity.X *= .9f;
-            }
+            // Dampening effect to gradually reduce velocity
+            velocity.X *= .9f;
+            velocity.Y *= .9f;
+            float speed = 1;
+            // Stop movement if velocity is below a threshold
             if (Math.Abs(velocity.X) < .25f)
             {
                 velocity.X = 0;
-            }
-            if (!up && !down)
-            {
-                velocity.Y *= .9f;
             }
             if (Math.Abs(velocity.Y) < .25f)
             {
                 velocity.Y = 0;
             }
 
-            if (left && velocity.X >= -maxspeed)
+            // Forward and Backward movement
+            if (up && velocity.Length() < maxspeed)  // velocity.Length() gives the magnitude of the velocity vector
             {
-                velocity.X--;
+                velocity.X += (float)Math.Sin(lookAngle) * speed;
+                velocity.Y += (float)Math.Cos(lookAngle) * speed;
             }
-            else if (right && velocity.X <= maxspeed)
+            else if (down && velocity.Length() < maxspeed)
             {
-                velocity.X++;
+                velocity.X -= (float)Math.Sin(lookAngle) * speed;
+                velocity.Y -= (float)Math.Cos(lookAngle) * speed;
             }
-            if (up && velocity.Y >= -maxspeed)
+
+            // Strafing (taking the perpendicular to the look direction)
+            if (left && velocity.Length() < maxspeed)
             {
-                velocity.Y--;
+                velocity.X += (float)Math.Sin(lookAngle + Math.PI / 2) * speed; // move left
+                velocity.Y += (float)Math.Cos(lookAngle + Math.PI / 2) * speed;
             }
-            else if (down && velocity.Y <= maxspeed)
+            else if (right && velocity.Length() < maxspeed)
             {
-                velocity.Y++;
+                velocity.X += (float)Math.Sin(lookAngle - Math.PI / 2) * speed; // move right
+                velocity.Y += (float)Math.Cos(lookAngle - Math.PI / 2) * speed;
+            }
+            if (lookLeft)
+            {
+                lookAngle += 0.05f;
+            }
+            if (lookRight)
+            {
+                lookAngle -= 0.05f;
             }
             Ray physicsRay = new Ray
             {
                 origin = player.Position,
                 direction = Vector2.Normalize(velocity)
             };
-            HitResult result = March(physicsRay);
-            if (!float.IsNaN(physicsRay.direction.X) && Vector2.Distance(result.EndPoint, player.Position) - player.Size.X <= minDst)
+            HitResult result = March(physicsRay, player.Size.X);
+            if (!float.IsNaN(physicsRay.direction.X) && Vector2.Distance(result.EndPoint, player.Position) <= minDst)
             {
                 Vector2 norm = EstimateNormal(result.EndPoint);
-                player.Position = result.EndPoint + (norm);
+                player.Position = result.EndPoint + norm;
                 velocity = Vector2.Zero;
             }
-            Text = player.Position.ToString();
+            Text = player.Position.ToString() + " - lookAngle: " + lookAngle;
 
-            var a = (float)Math.Atan2(PointToClient(Cursor.Position).X - player.Position.X, PointToClient(Cursor.Position).Y - player.Position.Y);
-            #region good ol' reliable
-            /*for (int i = -raysHalf; i < raysHalf; i++)
+
+            float angleIncrement = fov / screenResolution;
+            hitResults = new HitResult[screenResolution];
+
+            Parallel.For(-screenResolution / 2, screenResolution / 2, i =>
             {
-                Color currentCol = new Color();
-                float rayDst = 0;
-                float circleSize = 0;
-                Ray r = new Ray { origin = new Vector2(player.Position.X, player.Position.Y), direction = Vector2.Normalize(new Vector2((float)Math.Sin(a + (i / fov)), (float)Math.Cos(a + (i / fov)))) };
-                while (rayDst <= maxDst)
+                float offsetAngle = i * angleIncrement;
+                Ray ray = new Ray
                 {
-                    circleSize = signedDstToScene(r.origin, ref currentCol);
-                    rayDst += circleSize;
-                    if (circleSize > minDst)
-                    {
-                        posList.Add(r.origin);
-                        radii.Add(circleSize);
-                        r.origin += (r.direction * circleSize);
-                    }
-                    else
-                    {
-                        posList.Add(r.origin);
-                        radii.Add(circleSize);
-                        r.origin += (r.direction * circleSize);
-                        endPoints.Add(r.origin);
-                        endColors.Add(currentCol);
-
-                        break;
-                    }
-                }
-            }*/
-            #endregion
-
-            #region multithreaded
-            Parallel.For(-raysHalf, raysHalf, i =>
-            {
-                Ray ray = new Ray { origin = new Vector2(player.Position.X, player.Position.Y), direction = Vector2.Normalize(new Vector2((float)Math.Sin(a + (i / fov)), (float)Math.Cos(a + (i / fov)))) };
-                hitResults[i + raysHalf] = March(ray);
+                    origin = player.Position,
+                    direction = Vector2.Normalize(new Vector2((float)Math.Sin(lookAngle + offsetAngle), (float)Math.Cos(lookAngle + offsetAngle)))
+                };
+                hitResults[i + screenResolution / 2] = March(ray);
             });
 
-            #endregion
+            // Rendering
             using (Graphics g = Graphics.FromImage(render))
             {
                 g.FillRectangle(Brushes.Gray, 0, 0, render.Width, render.Height);
-                foreach(HitResult item in hitResults)
-                {
-                    float len = (10 / (float)GetDistance(player.Position.X, player.Position.Y, item.EndPoint.X, item.EndPoint.Y)) * 500;
-
-                    g.DrawLine(item.Color, item.ID, (render.Height / 2) - len, item.ID, (render.Height / 2) + len);
-
-                }
                 for (int i = 0; i < hitResults.Length; i++)
                 {
-                    var rayAngle = Math.Atan2(hitResults[i].EndPoint.Y - player.Position.Y, hitResults[i].EndPoint.X - player.Position.X);
-                    float dist = (float)GetDistance(player.Position.X, player.Position.Y, hitResults[i].EndPoint.X, hitResults[i].EndPoint.Y);
-                    float len = (1 / dist) * 5000;
-                    g.DrawLine(hitResults[i].Color, hitResults.Length - i, (render.Height / 2) - len, hitResults.Length - i, (render.Height / 2) + len);
+                    var centralLookAngle = lookAngle + (fov / 2);  // Move the lookAngle to the center
+                    var rayAngle = centralLookAngle + (i - screenResolution) * angleIncrement;
+                    float fisheyeCorrection = (float)Math.Cos(rayAngle - lookAngle);
+                    float rawDist = (float)GetDistance(player.Position.X, player.Position.Y, hitResults[i].EndPoint.X, hitResults[i].EndPoint.Y);
+                    float correctedDist = rawDist * fisheyeCorrection;
+
+                    float len = (1 / correctedDist) * 5000;
+                    g.DrawLine(hitResults[i].Color, i, (render.Height / 2) - len, i, (render.Height / 2) + len);
                 }
             }
-            player.Position += velocity;
-            theta += 0.01f;
-            Invalidate();
 
+            // Update player position
+            player.Position += velocity;
+
+            // Not sure what theta does, but keeping it
+            theta += 0.01f;
+
+            // Redraw
+            Invalidate();
         }
 
-        private HitResult March(Ray r)
+        private HitResult March(Ray r, float? minimumDst = null)
         {
+            float mDst = minDst;
+            if (minimumDst != null)
+            {
+                mDst = minimumDst.Value;
+            }
             Color currentCol = new Color();
             float rayDst = 0;
             float circleSize = 0;
@@ -336,9 +329,9 @@ namespace ray_marching
             {
                 circleSize = signedDstToScene(r.origin, ref currentCol);
                 rayDst += circleSize;
-                if (circleSize > minDst)
+                if (circleSize > mDst)
                 {
-                    r.origin += (r.direction * circleSize);
+                    r.origin += r.direction * circleSize;
                 }
                 else
                 {
@@ -356,7 +349,7 @@ namespace ray_marching
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            /*foreach (var item in shapes)
+            foreach (var item in shapes)
             {
                 if (item is Circle)
                 {
@@ -366,8 +359,11 @@ namespace ray_marching
                 {
                     e.Graphics.DrawRectangle(Pens.Blue, item.Position.X - item.Size.X, item.Position.Y - item.Size.Y, item.Size.X * 2, item.Size.Y * 2);
                 }
-            }*/
-            //e.Graphics.FillEllipse(Brushes.Turquoise, Cursor.Position.X - Left - 3, Cursor.Position.Y - Top - 3, 6, 6);
+                else if (item is StarFive)
+                {
+                    //cant draw star simply lol
+                }
+            }
             try
             {
                 for (int i = 0; i < hitResults.Length; i++)
@@ -379,12 +375,11 @@ namespace ray_marching
                     //e.Graphics.DrawEllipse(Pens.Green, posList[i].X - radii[i], posList[i].Y - radii[i], radii[i] * 2, radii[i] * 2);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //Console.WriteLine(ex.ToString());
 
             }
-            e.Graphics.DrawEllipse(Pens.Green, player.Position.X - 5, player.Position.Y - 5, 10, 10);
+            e.Graphics.DrawEllipse(Pens.Green, player.Position.X - player.Size.X, player.Position.Y - player.Size.X, player.Size.X * 2, player.Size.X * 2);
             //e.Graphics.DrawEllipse(Pens.Black, Cursor.Position.X - circleSize - Left, Cursor.Position.Y - circleSize - Top, circleSize * 2, circleSize * 2);
             //e.Graphics.DrawImageUnscaled(bm, 0, 0);
             e.Graphics.DrawImageUnscaled(render, ClientRectangle.X, formHeight);
@@ -412,7 +407,17 @@ namespace ray_marching
             {
                 right = false;
             }
+            if (e.KeyCode == Keys.E)
+            {
+                lookRight = false;
+            }
+            if (e.KeyCode == Keys.Q)
+            {
+                lookLeft = false;
+            }
         }
+        bool lookLeft, lookRight;
+        float lookAngle = 0f;
         private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.W)
@@ -430,6 +435,14 @@ namespace ray_marching
             else if (e.KeyCode == Keys.D)
             {
                 right = true;
+            }
+            if (e.KeyCode == Keys.E)
+            {
+                lookRight = true;
+            }
+            if (e.KeyCode == Keys.Q)
+            {
+                lookLeft = true;
             }
             if (e.KeyCode == Keys.P)
             {

@@ -14,7 +14,6 @@ namespace ray_marching
     public partial class Form1 : Form
     {
         private bool up, left, down, right;
-        private Bitmap bm;
         private List<float> radii = new List<float>();
         HitResult[] hitResults;
         float maxspeed = 5f;
@@ -136,7 +135,7 @@ namespace ray_marching
 
             return dstToScene;
         }
-
+        Graphics g;
         private void Form1_Load(object sender, EventArgs e)
         {
             shapes = new List<Shape>();
@@ -149,16 +148,6 @@ namespace ray_marching
                 Size = new Vector2(10, 10),
                 Color = Color.Purple,
             };
-
-            bm = new Bitmap(Width, Height);
-
-            for (int y = 0; y < Height; y++)
-            {
-                for (int x = 0; x < Width; x++)
-                {
-                    bm.SetPixel(x, y, Color.Transparent);
-                }
-            }
 
             DoubleBuffered = true;
             for (int i = 0; i < max; i++)
@@ -205,6 +194,7 @@ namespace ray_marching
             hitResults = new HitResult[screenResolution];
             MouseMove += Form1_MouseMove;
             prevMousePos = Cursor.Position;
+            g = Graphics.FromImage(render);
         }
         Point prevMousePos = Point.Empty;
         private void Form1_MouseMove(object sender, MouseEventArgs e)
@@ -225,6 +215,8 @@ namespace ray_marching
             ));
         }
         Vector2 gravity = Vector2.UnitY * 2f;
+        float angleIncrement = fov / screenResolution;
+
         private void timer1_Tick(object sender, EventArgs e)
         {
             // Dampening effect to gradually reduce velocity
@@ -276,7 +268,6 @@ namespace ray_marching
             Text = player.Position.ToString() + " - lookAngle: " + lookAngle;
 
 
-            float angleIncrement = fov / screenResolution;
             hitResults = new HitResult[screenResolution];
 
             Parallel.For(-screenResolution / 2, screenResolution / 2, i =>
@@ -291,29 +282,32 @@ namespace ray_marching
             });
 
             // Rendering
-            using (Graphics g = Graphics.FromImage(render))
-            {
-                g.FillRectangle(Brushes.Gray, 0, 0, render.Width, render.Height);
-                for (int i = 0; i < hitResults.Length; i++)
-                {
-                    var centralLookAngle = lookAngle + (fov / 2);  // Move the lookAngle to the center
-                    var rayAngle = centralLookAngle + (i - screenResolution) * angleIncrement;
-                    float fisheyeCorrection = (float)Math.Cos(rayAngle - lookAngle);
-                    float rawDist = (float)GetDistance(player.Position.X, player.Position.Y, hitResults[i].EndPoint.X, hitResults[i].EndPoint.Y);
-                    float correctedDist = rawDist * fisheyeCorrection;
 
-                    float len = (1 / correctedDist) * 5000;
-                    if (float.IsInfinity(len))
-                    {
-                        continue;
-                    }
-                    float wallStartY = (render.Height / 2) - len;
-                    float wallEndY = (render.Height / 2) + len;
-                    g.DrawLine(hitResults[i].Color, i, (render.Height / 2) - len, i, (render.Height / 2) + len);
-                    g.DrawLine(floorColor, i, (render.Height / 2) + len, i, render.Height - 1);
-                    g.DrawLine(ceilingColor, i, 0, i, (render.Height / 2) - len);
+            Pen p = new Pen(Color.White);
+            //g.FillRectangle(Brushes.Gray, 0, 0, render.Width, render.Height);
+            g.FillRectangle(ceilingColor, 0, 0, render.Width, render.Height / 2);
+            g.FillRectangle(floorColor, 0, render.Height / 2, render.Width, render.Height);
+            for (int i = 0; i < hitResults.Length; i++)
+            {
+                p.Color = hitResults[i].Color;
+                var centralLookAngle = lookAngle + (fov / 2);  // Move the lookAngle to the center
+                var rayAngle = centralLookAngle + (i - screenResolution) * angleIncrement;
+                float fisheyeCorrection = (float)Math.Cos(rayAngle - lookAngle);
+                float rawDist = (float)GetDistance(player.Position.X, player.Position.Y, hitResults[i].EndPoint.X, hitResults[i].EndPoint.Y);
+                float correctedDist = rawDist * fisheyeCorrection;
+
+                float len = (1 / correctedDist) * 5000;
+                if (float.IsInfinity(len))
+                {
+                    continue;
                 }
+                float wallStartY = (render.Height / 2) - len;
+                float wallEndY = (render.Height / 2) + len;
+                g.DrawLine(p, i, (render.Height / 2) - len, i, (render.Height / 2) + len);
+                //g.DrawLine(floorColor, i, (render.Height / 2) + len, i, render.Height - 1);
+                //g.DrawLine(ceilingColor, i, 0, i, (render.Height / 2) - len);
             }
+
             // Not sure what theta does, but keeping it
             theta += 0.01f;
 
@@ -378,11 +372,11 @@ namespace ray_marching
             }
             return collisions;
         }
-        Pen floorColor = new Pen(Color.LightCyan, 1);
-        Pen ceilingColor = new Pen(Color.LightBlue, 1);
-        Color fogColor = Color.LightBlue;
-        float fogStart = 100f; // Fog starts to appear at this distance
-        float fogEnd = 2000f; // Objects are fully obscured by fog beyond this distance
+        Brush floorColor = new SolidBrush(Color.DarkGray);
+        Brush ceilingColor = new SolidBrush(Color.LightBlue);
+        Color fogColor = Color.Transparent;
+        float fogStart = 75f; // Fog starts to appear at this distance
+        float fogEnd = 150f; // Objects are fully obscured by fog beyond this distance
         private HitResult March(Ray r, float? minimumDst = null)
         {
             float mDst = minDst;
@@ -410,28 +404,23 @@ namespace ray_marching
                 }
                 else
                 {
-                    Vector2 hitPoint = r.origin;
-
-                    // Estimate the normal using finite difference method
-                    Vector2 epsilon = new Vector2(0.01f, 0);
-                    float dX = signedDstToScene(hitPoint + epsilon) - signedDstToScene(hitPoint - epsilon);
-
-                    epsilon = new Vector2(0, 0.01f);
-                    float dY = signedDstToScene(hitPoint + epsilon) - signedDstToScene(hitPoint - epsilon);
-
-                    Vector2 wallNormal = Vector2.Normalize(new Vector2(dX, dY));
+                    #region Static Light
+                    Vector2 wallNormal = EstimateNormal(r.origin);
                     // Calculate the illumination based on the wall's normal and light direction
-                    float illumination = Vector2.Dot(lightDirection, wallNormal);
-                    illumination = Clamp(illumination, 0.2f, 1f);
+                    float illumination = Vector2.Dot(lightDirection, wallNormal) * 2;
+                    illumination = Clamp(illumination, 0.7f, 1f);
+                    #endregion
 
                     // Adjust the color based on illumination
                     currentCol = AdjustColor(currentCol, illumination); // Implement this function
-                    float fogFactor = (rayDst - fogStart) / (fogEnd - fogStart);
-                    fogFactor = Math.Max(0, Math.Min(1, fogFactor)); // Clamp between 0 and 1
-                    Color finalColor = BlendColors(currentCol, fogColor, fogFactor);
+                    #region Fog
+                    //float fogFactor = (rayDst - fogStart) / (fogEnd - fogStart);
+                    //fogFactor = Math.Max(0, Math.Min(1, fogFactor)); // Clamp between 0 and 1
+                    //Color finalColor = BlendColors(currentCol, fogColor, fogFactor);
+                    #endregion
                     return new HitResult
                     {
-                        Color = new Pen(finalColor, 1),
+                        Color = currentCol,
                         EndPoint = r.origin,
                         distanceToScene = signedDstToScene(r.origin),
                     };
@@ -442,7 +431,7 @@ namespace ray_marching
 
             return new HitResult
             {
-                Color = new Pen(fogColor, 1),
+                Color = fogColor,
                 EndPoint = r.origin,
                 distanceToScene = signedDstToScene(r.origin),
             };
@@ -487,10 +476,30 @@ namespace ray_marching
                 for (int i = 0; i < hitResults.Length; i++)
                 {
                     HitResult result = hitResults[i];
-                    if (result == null) continue;
-                    //asd was null, fuck multithreading
+                    if (result == null)
+                    {
+                        continue;
+                    }
+                    var centralLookAngle = lookAngle + (fov / 2);
+                    float rayAngle = centralLookAngle + (i - screenResolution) * angleIncrement;
+
+                    // Calculate dot product for Fresnel effect
+                    Vector2 viewDirection = new Vector2((float)Math.Cos(lookAngle), (float)Math.Sin(lookAngle));
+                    Vector2 rayDirection = new Vector2((float)Math.Cos(rayAngle), (float)Math.Sin(rayAngle));
+                    float dotProduct = Vector2.Dot(viewDirection, rayDirection);
+                    // Fresnel calculation
+                    float power = 0.6f; // Adjust this as needed
+                    float fresnel = 1.0f-Clamp((float)Math.Pow(1.0 - Math.Abs(dotProduct), power), 0, 1);
+                    // Adjust color brightness based on Fresnel effect
+                    Color wallColor = ColorMultiply(hitResults[i].Color, fresnel);
                     e.Graphics.DrawLine(Pens.Green, result.EndPoint.X, result.EndPoint.Y, player.Position.X, player.Position.Y);
-                    //e.Graphics.DrawEllipse(Pens.Green, posList[i].X - radii[i], posList[i].Y - radii[i], radii[i] * 2, radii[i] * 2);
+
+                    float fisheyeCorrection = (float)Math.Cos(rayAngle - lookAngle);
+                    float rawDist = (float)GetDistance(player.Position.X, player.Position.Y, hitResults[i].EndPoint.X, hitResults[i].EndPoint.Y);
+                    float correctedDist = rawDist * fisheyeCorrection;
+
+                    float len = (1 / correctedDist) * 5000;
+                    g.DrawLine(new Pen(wallColor, 1), i, (render.Height / 2) - len, i, (render.Height / 2) + len);
                 }
             }
             catch (Exception)
@@ -498,10 +507,16 @@ namespace ray_marching
 
             }
             //e.Graphics.DrawEllipse(Pens.Black, Cursor.Position.X - circleSize - Left, Cursor.Position.Y - circleSize - Top, circleSize * 2, circleSize * 2);
-            //e.Graphics.DrawImageUnscaled(bm, 0, 0);
             e.Graphics.DrawImageUnscaled(render, ClientRectangle.X, formHeight);
             e.Graphics.DrawEllipse(Pens.Red, player.Position.X - player.Size.X, player.Position.Y - player.Size.X, player.Size.X * 2, player.Size.X * 2);
 
+        }
+        private Color ColorMultiply(Color color, float factor)
+        {
+            int r = (int)(color.R * factor);
+            int g = (int)(color.G * factor);
+            int b = (int)(color.B * factor);
+            return Color.FromArgb(Math.Min(255, r), Math.Min(255, g), Math.Min(255, b));
         }
         private static double GetDistance(double x1, double y1, double x2, double y2)
         {
@@ -520,11 +535,11 @@ namespace ray_marching
             }
             if (e.KeyCode == Keys.A)
             {
-                left = false;
+                right = false;
             }
             else if (e.KeyCode == Keys.D)
             {
-                right = false;
+                left = false;
             }
             if (e.KeyCode == Keys.E)
             {
@@ -549,11 +564,11 @@ namespace ray_marching
             }
             if (e.KeyCode == Keys.A)
             {
-                left = true;
+                right = true;
             }
             else if (e.KeyCode == Keys.D)
             {
-                right = true;
+                left = true;
             }
             if (e.KeyCode == Keys.E)
             {

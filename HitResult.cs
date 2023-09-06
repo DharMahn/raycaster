@@ -10,7 +10,7 @@ namespace ray_marching
 {
     class HitResult
     {
-        public Pen Color;
+        public Color Color;
         public Vector2 EndPoint;
         public float distanceToScene;
     }

@@ -30,12 +30,11 @@ namespace ray_marching
         private float theta = 0f;
         const float maxDst = 10000;
         const float minDst = 0.001f;
-        const int maxSteps = 1000;
+        const int maxSteps = 2000;
         class Ray
         {
             public Vector2 origin;
             public Vector2 direction;
-
         }
         abstract class Shape
         {
@@ -304,7 +303,15 @@ namespace ray_marching
                     float correctedDist = rawDist * fisheyeCorrection;
 
                     float len = (1 / correctedDist) * 5000;
+                    if (float.IsInfinity(len))
+                    {
+                        continue;
+                    }
+                    float wallStartY = (render.Height / 2) - len;
+                    float wallEndY = (render.Height / 2) + len;
                     g.DrawLine(hitResults[i].Color, i, (render.Height / 2) - len, i, (render.Height / 2) + len);
+                    g.DrawLine(floorColor, i, (render.Height / 2) + len, i, render.Height - 1);
+                    g.DrawLine(ceilingColor, i, 0, i, (render.Height / 2) - len);
                 }
             }
             // Not sure what theta does, but keeping it
@@ -313,6 +320,7 @@ namespace ray_marching
             // Redraw
             Invalidate();
         }
+
         Vector2 CalculateTotalCorrection(List<ShapeCollisionInfo> collisions)
         {
             Vector2 totalCorrection = Vector2.Zero;
@@ -370,6 +378,11 @@ namespace ray_marching
             }
             return collisions;
         }
+        Pen floorColor = new Pen(Color.LightCyan, 1);
+        Pen ceilingColor = new Pen(Color.LightBlue, 1);
+        Color fogColor = Color.LightBlue;
+        float fogStart = 100f; // Fog starts to appear at this distance
+        float fogEnd = 2000f; // Objects are fully obscured by fog beyond this distance
         private HitResult March(Ray r, float? minimumDst = null)
         {
             float mDst = minDst;
@@ -413,10 +426,12 @@ namespace ray_marching
 
                     // Adjust the color based on illumination
                     currentCol = AdjustColor(currentCol, illumination); // Implement this function
-
+                    float fogFactor = (rayDst - fogStart) / (fogEnd - fogStart);
+                    fogFactor = Math.Max(0, Math.Min(1, fogFactor)); // Clamp between 0 and 1
+                    Color finalColor = BlendColors(currentCol, fogColor, fogFactor);
                     return new HitResult
                     {
-                        Color = new Pen(currentCol, 1),
+                        Color = new Pen(finalColor, 1),
                         EndPoint = r.origin,
                         distanceToScene = signedDstToScene(r.origin),
                     };
@@ -427,7 +442,7 @@ namespace ray_marching
 
             return new HitResult
             {
-                Color = new Pen(Color.Transparent, 1),
+                Color = new Pen(fogColor, 1),
                 EndPoint = r.origin,
                 distanceToScene = signedDstToScene(r.origin),
             };
@@ -441,6 +456,13 @@ namespace ray_marching
             int g = (int)(original.G * illumination);
             int b = (int)(original.B * illumination);
 
+            return Color.FromArgb(r, g, b);
+        }
+        Color BlendColors(Color baseColor, Color blendColor, float amount)
+        {
+            byte r = (byte)(baseColor.R + (blendColor.R - baseColor.R) * amount);
+            byte g = (byte)(baseColor.G + (blendColor.G - baseColor.G) * amount);
+            byte b = (byte)(baseColor.B + (blendColor.B - baseColor.B) * amount);
             return Color.FromArgb(r, g, b);
         }
         protected override void OnPaint(PaintEventArgs e)

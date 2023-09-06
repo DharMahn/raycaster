@@ -12,5 +12,6 @@ namespace ray_marching
     {
         public Pen Color;
         public Vector2 EndPoint;
+        public float distanceToScene;
     }
 }

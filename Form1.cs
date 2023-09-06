@@ -19,8 +19,8 @@ namespace ray_marching
         HitResult[] hitResults;
         float maxspeed = 5f;
         private const int max = 20;
-        const float fov = (float)Math.PI/3f;
-        const int screenResolution = 400;
+        const float fov = (float)Math.PI / 3f;
+        const int screenResolution = 800;
         //private float circleSize = 0;
         private Random r = new Random();
         private Bitmap render;
@@ -29,7 +29,8 @@ namespace ray_marching
         Vector2 velocity = new Vector2();
         private float theta = 0f;
         const float maxDst = 10000;
-        private float minDst = 0.1f;
+        const float minDst = 0.001f;
+        const int maxSteps = 1000;
         class Ray
         {
             public Vector2 origin;
@@ -70,14 +71,14 @@ namespace ray_marching
                 float h = Clamp(Vector2.Dot(p, ba) / Vector2.Dot(ba, ba), 0.0f, Size.X);
                 return length(p - ba * h) * Math.Sign(p.Y * ba.X - p.X * ba.Y);
             }
-            static float Clamp(float num, float min, float max)
-            {
-                if (num.CompareTo(min) < 0) return min;
-                if (num.CompareTo(max) > 0) return max;
-                return num;
-            }
-        }
 
+        }
+        public static float Clamp(float num, float min, float max)
+        {
+            if (num.CompareTo(min) < 0) return min;
+            if (num.CompareTo(max) > 0) return max;
+            return num;
+        }
         class Box : Shape
         {
             public override float Distance(Vector2 p)
@@ -145,7 +146,7 @@ namespace ray_marching
             render = new Bitmap(screenResolution, formHeight);
             player = new Circle
             {
-                Position = new Vector2(Width / 2, Height / 2),
+                Position = new Vector2(Width - 100, Height - 100),
                 Size = new Vector2(10, 10),
                 Color = Color.Purple,
             };
@@ -203,6 +204,19 @@ namespace ray_marching
             shapes.Add(new Box { Position = new Vector2(ClientSize.Width / 2, ClientSize.Height + 3), Size = new Vector2(ClientSize.Width / 2, 6), Color = Color.Blue });
             Height = (formHeight * 2) + 100;
             hitResults = new HitResult[screenResolution];
+            MouseMove += Form1_MouseMove;
+            prevMousePos = Cursor.Position;
+        }
+        Point prevMousePos = Point.Empty;
+        private void Form1_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!prevMousePos.IsEmpty)
+            {
+                lookAngle -= (e.Location.X - prevMousePos.X) / 200f;
+            }
+
+            Cursor.Position = PointToScreen(new Point(Width / 2, Height / 2));
+            prevMousePos = new Point(Width / 2, Height / 2);
         }
         Vector2 EstimateNormal(Vector2 pos)
         {
@@ -217,7 +231,7 @@ namespace ray_marching
             // Dampening effect to gradually reduce velocity
             velocity.X *= .9f;
             velocity.Y *= .9f;
-            float speed = 1;
+            float speed = .5f;
             // Stop movement if velocity is below a threshold
             if (Math.Abs(velocity.X) < .25f)
             {
@@ -259,18 +273,7 @@ namespace ray_marching
             {
                 lookAngle -= 0.05f;
             }
-            Ray physicsRay = new Ray
-            {
-                origin = player.Position,
-                direction = Vector2.Normalize(velocity)
-            };
-            HitResult result = March(physicsRay, player.Size.X);
-            if (!float.IsNaN(physicsRay.direction.X) && Vector2.Distance(result.EndPoint, player.Position) <= minDst)
-            {
-                Vector2 norm = EstimateNormal(result.EndPoint);
-                player.Position = result.EndPoint + norm;
-                velocity = Vector2.Zero;
-            }
+            HandleCollisions();
             Text = player.Position.ToString() + " - lookAngle: " + lookAngle;
 
 
@@ -304,17 +307,69 @@ namespace ray_marching
                     g.DrawLine(hitResults[i].Color, i, (render.Height / 2) - len, i, (render.Height / 2) + len);
                 }
             }
-
-            // Update player position
-            player.Position += velocity;
-
             // Not sure what theta does, but keeping it
             theta += 0.01f;
 
             // Redraw
             Invalidate();
         }
+        Vector2 CalculateTotalCorrection(List<ShapeCollisionInfo> collisions)
+        {
+            Vector2 totalCorrection = Vector2.Zero;
+            foreach (var collision in collisions)
+            {
+                float weight = 1.0f / (collision.SignedDistance + 0.0000001f); // Adding a small value to prevent division by zero
+                totalCorrection += collision.Normal * (player.Size.X - collision.SignedDistance) * weight;
+            }
+            return totalCorrection;
+        }
+        void HandleCollisions()
+        {
+            const int maxIterations = 10;
+            int currentIteration = 0;
 
+            Vector2 predictedPosition = player.Position + velocity;
+
+            while (currentIteration < maxIterations)
+            {
+                List<ShapeCollisionInfo> collisions = GetCollidingShapes(predictedPosition, player.Size.X + minDst);
+
+                if (collisions.Count == 0) // No more collisions to resolve
+                    break;
+
+                Vector2 totalCorrection = CalculateTotalCorrection(collisions);
+                predictedPosition += totalCorrection;
+
+                currentIteration++;
+            }
+
+            if (currentIteration > 0) // If we went through any iteration, it means there was a collision.
+            {
+                velocity = Vector2.Zero;
+            }
+
+            player.Position = predictedPosition;
+        }
+        struct ShapeCollisionInfo
+        {
+            public float SignedDistance;
+            public Vector2 Normal;
+        }
+
+        List<ShapeCollisionInfo> GetCollidingShapes(Vector2 position, float threshold)
+        {
+            List<ShapeCollisionInfo> collisions = new List<ShapeCollisionInfo>();
+            foreach (var item in shapes)
+            {
+                float dist = item.Distance(position);
+                if (dist < threshold)
+                {
+                    Vector2 norm = EstimateNormal(position); // Assuming EstimateNormal uses the position to estimate the normal
+                    collisions.Add(new ShapeCollisionInfo { SignedDistance = dist, Normal = norm });
+                }
+            }
+            return collisions;
+        }
         private HitResult March(Ray r, float? minimumDst = null)
         {
             float mDst = minDst;
@@ -325,28 +380,69 @@ namespace ray_marching
             Color currentCol = new Color();
             float rayDst = 0;
             float circleSize = 0;
-            while (rayDst <= maxDst)
+            int iter = 0;
+
+            // Define the light direction here
+            Vector2 lightDirection = new Vector2(0, -1);
+            lightDirection = Vector2.Normalize(lightDirection);
+
+            while (rayDst <= maxDst && iter < maxSteps)
             {
                 circleSize = signedDstToScene(r.origin, ref currentCol);
                 rayDst += circleSize;
+
                 if (circleSize > mDst)
                 {
                     r.origin += r.direction * circleSize;
                 }
                 else
                 {
-                    //r.origin += (r.direction * circleSize);
+                    Vector2 hitPoint = r.origin;
+
+                    // Estimate the normal using finite difference method
+                    Vector2 epsilon = new Vector2(0.01f, 0);
+                    float dX = signedDstToScene(hitPoint + epsilon) - signedDstToScene(hitPoint - epsilon);
+
+                    epsilon = new Vector2(0, 0.01f);
+                    float dY = signedDstToScene(hitPoint + epsilon) - signedDstToScene(hitPoint - epsilon);
+
+                    Vector2 wallNormal = Vector2.Normalize(new Vector2(dX, dY));
+                    // Calculate the illumination based on the wall's normal and light direction
+                    float illumination = Vector2.Dot(lightDirection, wallNormal);
+                    illumination = Clamp(illumination, 0.2f, 1f);
+
+                    // Adjust the color based on illumination
+                    currentCol = AdjustColor(currentCol, illumination); // Implement this function
+
                     return new HitResult
                     {
                         Color = new Pen(currentCol, 1),
                         EndPoint = r.origin,
+                        distanceToScene = signedDstToScene(r.origin),
                     };
-
                 }
+
+                iter++;
             }
-            return new HitResult();
+
+            return new HitResult
+            {
+                Color = new Pen(Color.Transparent, 1),
+                EndPoint = r.origin,
+                distanceToScene = signedDstToScene(r.origin),
+            };
         }
 
+        // Implement this function to adjust color based on illumination
+        private Color AdjustColor(Color original, float illumination)
+        {
+            // Scale each color component by illumination
+            int r = (int)(original.R * illumination);
+            int g = (int)(original.G * illumination);
+            int b = (int)(original.B * illumination);
+
+            return Color.FromArgb(r, g, b);
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             foreach (var item in shapes)
@@ -379,10 +475,11 @@ namespace ray_marching
             {
 
             }
-            e.Graphics.DrawEllipse(Pens.Green, player.Position.X - player.Size.X, player.Position.Y - player.Size.X, player.Size.X * 2, player.Size.X * 2);
             //e.Graphics.DrawEllipse(Pens.Black, Cursor.Position.X - circleSize - Left, Cursor.Position.Y - circleSize - Top, circleSize * 2, circleSize * 2);
             //e.Graphics.DrawImageUnscaled(bm, 0, 0);
             e.Graphics.DrawImageUnscaled(render, ClientRectangle.X, formHeight);
+            e.Graphics.DrawEllipse(Pens.Red, player.Position.X - player.Size.X, player.Position.Y - player.Size.X, player.Size.X * 2, player.Size.X * 2);
+
         }
         private static double GetDistance(double x1, double y1, double x2, double y2)
         {

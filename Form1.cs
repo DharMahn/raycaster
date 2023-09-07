@@ -14,7 +14,6 @@ namespace ray_marching
     public partial class Form1 : Form
     {
         private bool up, left, down, right;
-        private List<float> radii = new List<float>();
         HitResult[] hitResults;
         float maxspeed = 5f;
         private const int max = 20;
@@ -26,7 +25,6 @@ namespace ray_marching
         Circle player;
         List<Shape> shapes;
         Vector2 velocity = new Vector2();
-        private float theta = 0f;
         const float maxDst = 10000;
         const float minDst = 0.001f;
         const int maxSteps = 2000;
@@ -307,9 +305,6 @@ namespace ray_marching
                 //g.DrawLine(floorColor, i, (render.Height / 2) + len, i, render.Height - 1);
                 //g.DrawLine(ceilingColor, i, 0, i, (render.Height / 2) - len);
             }
-
-            // Not sure what theta does, but keeping it
-            theta += 0.01f;
 
             // Redraw
             Invalidate();
